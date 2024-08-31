@@ -97,59 +97,94 @@ def load_data(filename='qubo_data.pkl'):
     return data_list
 
 # %%
-import numpy as np
+# import numpy as np
+# import pickle
+# from qiskit_optimization.applications import Maxcut
+# from tqdm import tqdm
+
+# data_list = []
+# delta=0
+
+# # New data collection process
+# for _ in tqdm(range(80)):  # tqdm will display the progress
+#     G = gen_graph(100, 3, 3)
+#     qubo = Maxcut(G).to_quadratic_program()
+
+#     variables = qubo.variables
+#     qubo_matrix = qubo.objective.quadratic.to_array()
+#     linear_terms = qubo.objective.linear.to_array()
+
+#     np.fill_diagonal(qubo_matrix, qubo_matrix.diagonal() + linear_terms)
+#     qubo_matrix *= -1
+
+#     results_impact = {}
+#     results_cluster_concat = {}
+#     results_cluster_coreg = {}
+#     results_random = {}
+#     results_pool = {}
+
+#     for qubit_size in range(10, 25):
+#         res_impact = hybrid_qubo_solve(qubo_matrix, max_qubit_size=qubit_size, group_method='impact')
+#         res_cluster_concat = hybrid_qubo_solve(qubo_matrix, max_qubit_size=qubit_size, group_method='cluster', simulated=True)
+#         res_cluster_coreg = hybrid_qubo_solve(qubo_matrix, max_qubit_size=qubit_size, group_method='cluster', multi_view='co-regularization')
+#         res_random = hybrid_qubo_solve(qubo_matrix, max_qubit_size=qubit_size, group_method='random', simulated=True, classical_method='tabu')
+#         res_pool = hybrid_qubo_solve(qubo_matrix, max_qubit_size=qubit_size, group_method='impact', simulated=True, classical_method='tabu')
+
+#         results_impact[qubit_size] = res_impact
+#         results_cluster_concat[qubit_size] = res_cluster_concat
+#         results_cluster_coreg[qubit_size] = res_cluster_coreg
+#         results_pool[qubit_size] = res_pool
+#         results_random[qubit_size] = res_random
+
+#     data_list.append({
+#         'matrix': qubo_matrix,
+#         'results_impact': results_impact,
+#         'results_cluster': results_cluster_concat,
+#         'results_cluster_coreg': results_cluster_coreg,
+#         'results_random': results_random,
+#         'results_pool': results_pool
+#     })
+
+#     # Save the updated data list
+#     with open('data/100Node3Regular_d_data.pkl', 'wb') as file:
+#         pickle.dump(data_list, file)
+
+
 import pickle
-from qiskit_optimization.applications import Maxcut
+import numpy as np
 from tqdm import tqdm
 
-data_list = []
-delta=0
+def correct_data(data_list):
+    for entry in tqdm(data_list):
+        qubo_matrix = entry['matrix']
+        
+        results_cluster_coreg = {}
+        for qubit_size in range(10, 25):
+            print(qubit_size)
+            res_cluster_coreg = hybrid_qubo_solve(
+                qubo_matrix, 
+                max_qubit_size=qubit_size, 
+                group_method='cluster', 
+                multi_view='co-regularization',
+                simulated=True,
+            )
+            results_cluster_coreg[qubit_size] = res_cluster_coreg
 
-# New data collection process
-for _ in tqdm(range(80)):  # tqdm will display the progress
-    G = gen_graph(100, 3, 3)
-    qubo = Maxcut(G).to_quadratic_program()
+        entry['results_cluster_coreg'] = results_cluster_coreg
+    
+    return data_list
 
-    variables = qubo.variables
-    qubo_matrix = qubo.objective.quadratic.to_array()
-    linear_terms = qubo.objective.linear.to_array()
+def main():
+    # Load the existing data
+    with open('data/100Node3Regular_d_data.pkl', 'rb') as file:
+        data_list = pickle.load(file)
+    
+    # Correct the data
+    corrected_data_list = correct_data(data_list)
+    
+    # Save the updated data
+    with open('data/100Node3Regular_d_data.pkl', 'wb') as file:
+        pickle.dump(corrected_data_list, file)
 
-    np.fill_diagonal(qubo_matrix, qubo_matrix.diagonal() + linear_terms)
-    qubo_matrix *= -1
-
-    results_impact = {}
-    results_cluster_concat = {}
-    results_cluster_coreg = {}
-    results_random = {}
-    results_pool = {}
-
-    for qubit_size in range(10, 25):
-        # res_impact = hybrid_qubo_solve(qubo_matrix, max_qubit_size=qubit_size, group_method='impact')
-        # res_cluster_concat = hybrid_qubo_solve(qubo_matrix, max_qubit_size=qubit_size, group_method='cluster')
-        # res_cluster_coreg = hybrid_qubo_solve(qubo_matrix, max_qubit_size=qubit_size, group_method='cluster', multi_view='co-regularization')
-        res_random = hybrid_qubo_solve(qubo_matrix, max_qubit_size=qubit_size, group_method='random', simulated=True, classical_method='tabu')
-        res_pool = hybrid_qubo_solve(qubo_matrix, max_qubit_size=qubit_size, group_method='impact', simulated=True, classical_method='tabu')
-
-        # results_impact[qubit_size] = res_impact
-        # results_cluster_concat[qubit_size] = res_cluster_concat
-        # results_cluster_coreg[qubit_size] = res_cluster_coreg
-        results_pool[qubit_size] = res_pool
-        print('pool', res_pool['val'])
-        results_random[qubit_size] = res_random
-        print('random', res_random['val'])
-        delta += res_pool['val'] - res_random['val']
-        print('delta', delta)
-
-    data_list.append({
-        'matrix': qubo_matrix,
-        # 'results_impact': results_impact,
-        # 'results_cluster': results_cluster_concat,
-        # 'results_cluster_coreg': results_cluster_coreg,
-        'results_random': results_random,
-        'results_pool': results_pool
-    })
-
-    # Save the updated data list
-    with open('100Node3Regular_d_data.pkl', 'wb') as file:
-        pickle.dump(data_list, file)
-
+if __name__ == "__main__":
+    main()

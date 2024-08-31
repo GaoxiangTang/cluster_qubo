@@ -286,7 +286,7 @@ def group_by_impact(matrix, best_solution, max_qubit_size):
         groups.append(sorted_indices[start:end].tolist())
     return groups
 
-from split_cluster import split_spectral_cluster
+from src.split_cluster import split_spectral_cluster
 
 def group_by_clustering(matrix, x, max_qubit_size, min_ratio=None, multi_view=None):
     q_tilde = np.outer((-1)**x, (-1)**x) * matrix
@@ -313,8 +313,8 @@ def select_subsets(groups, fraction, n, shuffle=True):
 
 from copy import copy
 
-def hybrid_qubo_solve(matrix, num_repeats=100, fraction=0.15, max_qubit_size=20
-                      , group_method="impact", classical_method='local', N_S=5, N_I=20, multi_view=None,
+def hybrid_qubo_solve(matrix, num_repeats=100, fraction=0.15, max_qubit_size=20,
+                      group_method="impact", classical_method='local', N_S=5, N_I=20, multi_view=None,
                       simulated=False):
     """
     Hybrid solver for QUBO problems using both classical Tabu Search and quantum QAOA, based on Algorithm 1 from the article.
@@ -330,9 +330,11 @@ def hybrid_qubo_solve(matrix, num_repeats=100, fraction=0.15, max_qubit_size=20
     quantum_time = 0
     start_time = time.time()
 
+    classical_values = []  # List to store function values after each classical optimization step
+
     # Initialize with tabu search
     if classical_method == 'local':
-        best_solution = local_search(matrix, np.random.randint(0,2,n))
+        best_solution = local_search(matrix, np.random.randint(0, 2, n))
         best_value = evaluate_qubo(matrix, best_solution)
     elif classical_method == 'tabu':
         best_solution, best_value = solve_tabu(matrix)
@@ -344,6 +346,8 @@ def hybrid_qubo_solve(matrix, num_repeats=100, fraction=0.15, max_qubit_size=20
         pool = []
         heapq.heappush(pool, (-best_value, tuple(best_solution)))
     
+    classical_values.append(best_value)  # Record the initial function value
+
     # Main loop
     repeats = 0
     while no_improvement_streak <= 3 and repeats < num_repeats:
@@ -351,7 +355,7 @@ def hybrid_qubo_solve(matrix, num_repeats=100, fraction=0.15, max_qubit_size=20
         repeats += 1
         groups = group_indices(matrix, best_solution, group_method, max_qubit_size, pool=pool, N_S=N_S, multi_view=multi_view)
         # 'pool' method selects the least determined solution vectors.
-        selected_groups = select_subsets(groups, fraction, n, group_method!='pool')
+        selected_groups = select_subsets(groups, fraction, n, group_method != 'pool')
         
         for indices in selected_groups:
             sub_matrix, offset = sub_qubo_matrix(matrix, current_solution, indices)
@@ -373,8 +377,8 @@ def hybrid_qubo_solve(matrix, num_repeats=100, fraction=0.15, max_qubit_size=20
                 qaoa_solution = res.x
 
             # Update the solution with the result from QAOA
-            if evaluate_qubo(sub_matrix, qaoa_solution) < evaluate_qubo(sub_matrix, current_solution[indices]):
-                print("new minimum found in QAOA", evaluate_qubo(sub_matrix, qaoa_solution), " lesser than ", evaluate_qubo(sub_matrix, current_solution[indices]))
+            # if evaluate_qubo(sub_matrix, qaoa_solution) < evaluate_qubo(sub_matrix, current_solution[indices]):
+            #     print("new minimum found in QAOA", evaluate_qubo(sub_matrix, qaoa_solution), " lesser than ", evaluate_qubo(sub_matrix, current_solution[indices]))
             current_solution[indices] = qaoa_solution
 
         if classical_method == 'local':
@@ -383,8 +387,9 @@ def hybrid_qubo_solve(matrix, num_repeats=100, fraction=0.15, max_qubit_size=20
         elif classical_method == 'tabu':
             current_solution, current_value = solve_tabu(matrix, current_solution) 
 
+        classical_values.append(current_value)  # Record the function value after classical optimization
+
         if group_method == 'pool':
-            # print(pool, (current_value, tuple(current_solution)))
             heapq.heappush(pool, (-current_value, tuple(current_solution)))
             if len(pool) > N_I:
                 heapq.heappop(pool)
@@ -403,7 +408,8 @@ def hybrid_qubo_solve(matrix, num_repeats=100, fraction=0.15, max_qubit_size=20
         'val': evaluate_qubo(matrix, best_solution),
         'quantum_calls': quantum_calls,
         'total_iters': total_iters,
-        'classical_runtime': classical_runtime
+        'classical_runtime': classical_runtime,
+        'classical_values': classical_values  # Include the recorded function values in the result
     }
 
     return result

@@ -96,85 +96,76 @@ def constrained_kmeans(X, max_size, min_size, n_clusters):
     return kmeans.fit_predict(X)
 
 from math import ceil, floor
+from sklearn.metrics import normalized_mutual_info_score
 
-def co_regularization(views, number_of_clusters, number_of_iterations=1000, lambda_value=0.025, random_state=None):
-    """
-    Co-Regularized Multi-view Spectral Clustering algorithm modified to return the first view's feature matrix.
-
-    Parameters
-    ----------
-    views : list of numpy arrays
-        The views (data) as list of numpy arrays, must be of same size.
-
-    number_of_clusters : int
-
-    number_of_iterations : int
-        Usually less than 10 iterations necessary until convergence.
-
-    lambda_value : float
-        Hyperparameter, trades-off spectral clustering objectives and spectral embedding (dis)agreement term.
-        Usually small (< 0.03).
-
-    random_state : int, RandomState instance or None
-        Random state for k-means step.
-
-    Returns
-    -------
-    U[0] : numpy array
-        The feature matrix of the first view after convergence.
-
-    Reference
-    -------
-    Kumar, Abhishek, Piyush Rai, and Hal Daume. "Co-regularized multi-view spectral clustering." Advances in neural information processing systems 24 (2011).
-    """
+def compute_normalized_laplacian(affinity_matrix):
+    """Compute the normalized Laplacian matrix from the affinity matrix."""
+    degree_matrix = np.diag(np.sum(affinity_matrix, axis=1))
+    # Handle zero degrees to avoid division by zero
+    with np.errstate(divide='ignore', invalid='ignore'):
+        d_inv_sqrt = np.diag(1.0 / np.sqrt(np.sum(affinity_matrix, axis=1)))
+        d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0
+        d_inv_sqrt[np.isnan(d_inv_sqrt)] = 0
     
-    def compute_laplacian(sim_matrix):
-        """Compute the symmetric normalized Laplacian matrix L_sym = I - D^{-1/2} W D^{-1/2}."""
-        # Compute the degree matrix
-        degree_matrix = np.diag(np.sum(sim_matrix, axis=1))
-        
-        # Compute D^{-1/2}
-        d_inv_sqrt = np.diag(1.0 / np.sqrt(np.sum(sim_matrix, axis=1)))
-        
-        # Compute the symmetric normalized Laplacian
-        identity_matrix = np.eye(sim_matrix.shape[0])
-        laplacian_sym = identity_matrix - np.dot(np.dot(d_inv_sqrt, sim_matrix), d_inv_sqrt)
-    
-        return laplacian_sym
-    def get_k_largest_eigenvectors(laplacian, k):
-        """Get the k largest eigenvectors of the Laplacian matrix."""
-        eigvals, eigvecs = np.linalg.eigh(laplacian)
-        sorted_indices = np.argsort(-eigvals, )
-        k_smallest_indices = sorted_indices[:k]
-        return eigvecs[:, k_smallest_indices]
+    laplacian_matrix = degree_matrix - affinity_matrix
+    normalized_laplacian = np.matmul(np.matmul(d_inv_sqrt, laplacian_matrix), d_inv_sqrt)
+    return normalized_laplacian
 
+def get_k_smallest_eigenvectors(laplacian, k):
+    """Get the k smallest eigenvectors of the Laplacian matrix."""
+    eigvals, eigvecs = np.linalg.eigh(laplacian)
+    sorted_indices = np.argsort(eigvals)
+    k_smallest_indices = sorted_indices[:k]
+    return eigvecs[:, k_smallest_indices]
+
+def co_regularization(views, number_of_clusters, number_of_iterations=1000, lambda_value=0.025, random_state=None, calculate_nmi=False, true_labels=None):
+    """
+    Co-Regularized Multi-view Spectral Clustering algorithm modified to return the first view's feature matrix and NMI over time if specified.
+    """
     L = {}
     U = {}
     val = 0
     for i, view in enumerate(views):
         sim_matrix = view
-        L[i] = compute_laplacian(sim_matrix)
-        U[i] = get_k_largest_eigenvectors(L[i], number_of_clusters)
+        L[i] = compute_normalized_laplacian(sim_matrix)
+        U[i] = get_k_smallest_eigenvectors(L[i], number_of_clusters)
         val += np.trace(U[i].T @ L[i] @ U[i])
         for j in range(i):
-            val += lambda_value * np.trace(U[i].T @ U[j] @ U[j].T @ U[i])
+            val -= lambda_value * np.trace(U[i].T @ U[j] @ U[j].T @ U[i])
 
     vals = [val]
+    nmi_scores = []
+
+    if calculate_nmi and true_labels is not None:
+        kmeans = KMeans(n_clusters=number_of_clusters, random_state=random_state).fit(U[0])
+        predicted_labels = kmeans.labels_
+        nmi_score = normalized_mutual_info_score(true_labels, predicted_labels)
+        nmi_scores.append(nmi_score)
 
     for _ in range(number_of_iterations):
         delta = 0
         for j, view in enumerate(views):
             KU = sum((eigenvectors @ eigenvectors.T) for k, eigenvectors in U.items() if k != j)
-            lap = L[j] + lambda_value * KU
+            lap = L[j] - lambda_value * KU
             last = np.trace(U[j].T @ lap @ U[j])
-            U[j] = get_k_largest_eigenvectors(lap, number_of_clusters)
-            delta += np.trace(U[j].T @ lap @ U[j])-last
-        vals.append(vals[-1]+delta)
-        print(delta)
-        if delta < 1e-4:
+            U[j] = get_k_smallest_eigenvectors(lap, number_of_clusters)
+            delta += np.trace(U[j].T @ lap @ U[j]) - last
+            L[j] =lap
+        vals.append(vals[-1] + delta)
+        
+        if calculate_nmi and true_labels is not None:
+            kmeans = KMeans(n_clusters=number_of_clusters, random_state=random_state).fit(U[0])
+            predicted_labels = kmeans.labels_
+            nmi_score = normalized_mutual_info_score(true_labels, predicted_labels)
+            nmi_scores.append(nmi_score)
+        
+        if abs(delta) < 5e-6:
             break
 
-    return U[0]
+    if calculate_nmi and true_labels is not None:
+        return U[0], vals, nmi_scores
+    else:
+        return U[0]
 
 def split_spectral_cluster(Q_tilde, max_size, min_size=0, n_clusters=None, method="constrained_kmeans", multi_view=None):
     """
