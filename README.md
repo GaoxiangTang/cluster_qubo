@@ -1,2 +1,2 @@
 # cluster_qubo
-using clustering for grouping in hybrid-qubo algorithms
+using cluster for grouping in hybrid-qubo algorithms
