@@ -1,2 +1,2 @@
 # Ignore large data files
-data/*.pkl
+data
